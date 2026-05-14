@@ -15,3 +15,13 @@ haikus/
   YYYY/
     MM-DD-word.md
 ```
+
+## Automation note (for agents running scheduled tasks)
+
+This repository is updated by a Cowork scheduled task. The Cowork sandbox mounts this folder over FUSE with a policy that blocks `unlink()`, which leaves git lock files stranded and breaks subsequent git operations. **Before running any git command in the sandbox, source the setup script once per session:**
+
+```bash
+source .cowork/setup.sh
+```
+
+That activates a thin `git` wrapper (`.cowork/git-safe`) which clears stale locks before and after each git invocation. Outside the Cowork sandbox the setup script is a no-op, so it's safe to source anywhere.
