@@ -1,0 +1,49 @@
+#!/bin/bash
+# git-safe — git wrapper for the Cowork sandbox FUSE mount.
+#
+# The workspace folder is mounted into the sandbox over FUSE/virtiofs with a
+# policy that permits create/write/rename but blocks unlink(). Git creates
+# *.lock files for every ref/index update and tries to unlink them after the
+# work is done; on this mount, the unlink fails silently and the stale lock
+# sits there forever, blocking the next git operation with
+# "Another git process seems to be running".
+#
+# This wrapper renames any stale locks aside before invoking git, runs git,
+# then renames any new leftover locks aside after. The unlinks still fail
+# under the hood, but the operation completes cleanly and the next git call
+# isn't blocked.
+#
+# Outside the Cowork sandbox (e.g. on the user's Mac) this script isn't
+# needed — locks unlink normally — but it remains safe to call anywhere.
+
+set -u
+
+REAL_GIT="${COWORK_REAL_GIT:-/usr/bin/git}"
+
+# Find .git directory if we're inside a repo (suppress errors when we're not).
+GIT_DIR_PATH="$("$REAL_GIT" rev-parse --git-dir 2>/dev/null || true)"
+
+clear_locks() {
+  [ -z "$GIT_DIR_PATH" ] && return 0
+  [ ! -d "$GIT_DIR_PATH" ] && return 0
+  local ts
+  ts="$(date +%s%N)"
+  # Rename active *.lock files (but not already-moved *.lock.* files) aside.
+  find "$GIT_DIR_PATH" -maxdepth 4 -name "*.lock" ! -name "*.lock.*" 2>/dev/null | \
+    while read -r f; do
+      mv "$f" "${f}.moved-${ts}" 2>/dev/null || true
+    done
+  return 0
+}
+
+# Allow callers to just clean locks without running a git command.
+if [ "${1:-}" = "--clear-locks-only" ]; then
+  clear_locks
+  exit 0
+fi
+
+clear_locks
+"$REAL_GIT" "$@"
+rc=$?
+clear_locks
+exit "$rc"
